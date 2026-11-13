@@ -1,0 +1,38 @@
+name: Publish one LHRF educational post
+on: workflow_dispatch
+permissions: {}
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Publish one educational post
+        env:
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, datetime
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          opener=urllib.request.build_opener(NoRedirect())
+          base="https://bsky.social/xrpc/"
+          did="did:plc:k3qs4p7s7cylcqpvbj5v7dn4"
+          def post(endpoint, data, token=None):
+              headers={"Content-Type":"application/json"}
+              if token: headers["Authorization"]="Bearer "+token
+              req=urllib.request.Request(base+endpoint,data=json.dumps(data).encode(),headers=headers,method="POST")
+              with opener.open(req,timeout=20) as res: return json.load(res)
+          try:
+              pw=os.environ.get("BSKY_APP_PASSWORD","")
+              if not pw: raise ValueError("missing")
+              session=post("com.atproto.server.createSession",{"identifier":"lhrftraining.bsky.social","password":pw})
+              if session.get("did")!=did or session.get("handle","").lower()!="lhrftraining.bsky.social": raise ValueError("identity")
+              text="Two sessions in one day? If your schedule allows, do the one you most want to perform well first. A demanding run and hard lower-body work can both leave your legs tired, so plan the rest of the week around them."
+              record={"$type":"app.bsky.feed.post","text":text,"createdAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),"langs":["en"]}
+              result=post("com.atproto.repo.createRecord",{"repo":did,"collection":"app.bsky.feed.post","rkey":"lhrf-session-order-20261113","record":record},session["accessJwt"])
+              if result.get("uri")!="at://"+did+"/app.bsky.feed.post/lhrf-session-order-20261113": raise ValueError("unexpected result")
+              print("Post created; fixed record key lhrf-session-order-20261113")
+          except Exception:
+              print("Publishing failed or result uncertain; inspect the fixed record before retrying.")
+              raise SystemExit(1)
+          PY

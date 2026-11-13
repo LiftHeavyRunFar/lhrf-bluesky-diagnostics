@@ -1,0 +1,32 @@
+name: Authentication-only check
+on: workflow_dispatch
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check account without publishing
+        env:
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          password = os.environ.get("BSKY_APP_PASSWORD", "")
+          if not password or "\n" in password or "\r" in password:
+              print("Missing or invalid credential; no request made")
+              raise SystemExit(1)
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          body = json.dumps({"identifier":"lhrftraining.bsky.social","password":password}).encode()
+          req = urllib.request.Request("https://bsky.social/xrpc/com.atproto.server.createSession", data=body, method="POST", headers={"Content-Type":"application/json","Accept":"application/json"})
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(req, timeout=15) as response:
+                  data = json.loads(response.read(32769))
+              ok = (data.get("handle","").lower() == "lhrftraining.bsky.social" and data.get("did") == "did:plc:k3qs4p7s7cylcqpvbj5v7dn4" and all(isinstance(data.get(k),str) and data[k] for k in ("accessJwt","refreshJwt")))
+          except Exception:
+              ok = False
+          print("Expected account authenticated" if ok else "Authentication or identity check failed")
+          raise SystemExit(0 if ok else 1)
+          PY

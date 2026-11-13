@@ -1,0 +1,47 @@
+name: Reply to one squat and running post
+on: workflow_dispatch
+permissions: {}
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send one specific reply
+        env:
+          PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, urllib.parse, urllib.error, datetime
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          op=urllib.request.build_opener(NoRedirect())
+          base='https://bsky.social/xrpc/'
+          did='did:plc:k3qs4p7s7cylcqpvbj5v7dn4'
+          uri='at://did:plc:qtya3wv5atp37w3cpaot2zpr/app.bsky.feed.post/3n26udlb4ls2r'
+          cid='bafyreicflthj2djpo7s5pl42cgaac6srm4rvbxkolnjxkmpx2632qb57ie'
+          rkey='3n27naygfet3e'
+          def call(endpoint, data=None, token=None):
+              headers={'Content-Type':'application/json'}
+              if token: headers['Authorization']='Bearer '+token
+              req=urllib.request.Request(base+endpoint, data=json.dumps(data).encode() if data is not None else None, headers=headers)
+              with op.open(req, timeout=20) as res: return json.load(res)
+          stage='authentication'
+          try:
+              s=call('com.atproto.server.createSession', {'identifier':'lhrftraining.bsky.social','password':os.environ['PASSWORD']})
+              if s.get('did')!=did or s.get('handle','').lower()!='lhrftraining.bsky.social': raise ValueError('identity')
+              token=s['accessJwt']
+              stage='check thread'
+              thread=call('app.bsky.feed.getPostThread?'+urllib.parse.urlencode({'uri':uri,'depth':1}), token=token).get('thread',{})
+              if thread.get('post',{}).get('cid')!=cid: raise ValueError('target changed')
+              if any(x.get('post',{}).get('author',{}).get('did')==did for x in thread.get('replies',[])): raise ValueError('already replied')
+              ref={'uri':uri,'cid':cid}
+              record={'$type':'app.bsky.feed.post','text':'Dropping the weight sounds like a sensible way to get those 4 x 8 squats moving again. How do you usually fit squat days around your runs? (The dog may have opinions on the home workouts!)','createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'langs':['en'],'reply':{'root':ref,'parent':ref}}
+              stage='create reply'
+              result=call('com.atproto.repo.createRecord',{'repo':did,'collection':'app.bsky.feed.post','rkey':rkey,'record':record},token)
+              if result.get('uri')!='at://'+did+'/app.bsky.feed.post/'+rkey: raise ValueError('unexpected result')
+              print('Reply created:',rkey)
+          except urllib.error.HTTPError as e:
+              print('Stage:',stage,'HTTP',e.code); raise SystemExit(1)
+          except Exception as e:
+              print('Stage:',stage,'error type:',type(e).__name__); raise SystemExit(1)
+          PY

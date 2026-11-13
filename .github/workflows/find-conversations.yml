@@ -1,0 +1,37 @@
+name: Find training conversations
+on: workflow_dispatch
+permissions: {}
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Search public posts
+        env:
+          PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, urllib.parse, urllib.error
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+          opener=urllib.request.build_opener(NoRedirect())
+          def call(url, data=None, token=None):
+              headers={'Content-Type':'application/json'}
+              if token: headers['Authorization']='Bearer '+token
+              req=urllib.request.Request(url, data=json.dumps(data).encode() if data else None, headers=headers)
+              with opener.open(req, timeout=20) as response: return json.load(response)
+          try:
+              s=call('https://bsky.social/xrpc/com.atproto.server.createSession', {'identifier':'lhrftraining.bsky.social','password':os.environ['PASSWORD']})
+              if s.get('did') != 'did:plc:k3qs4p7s7cylcqpvbj5v7dn4': raise ValueError('wrong account')
+              for q in ['running lifting', 'running strength training', 'run gym']:
+                  url='https://bsky.social/xrpc/app.bsky.feed.searchPosts?'+urllib.parse.urlencode({'q':q,'sort':'latest','limit':15,'lang':'en'})
+                  posts=call(url, token=s['accessJwt']).get('posts',[])
+                  print('QUERY',q)
+                  for p in posts:
+                      rec=p.get('record',{})
+                      print(json.dumps({'uri':p.get('uri'),'cid':p.get('cid'),'handle':p.get('author',{}).get('handle'),'text':rec.get('text'),'createdAt':rec.get('createdAt'),'reply':rec.get('reply')},ensure_ascii=True))
+          except urllib.error.HTTPError as e:
+              print('HTTP',e.code); raise SystemExit(1)
+          except Exception as e:
+              print('Error type',type(e).__name__); raise SystemExit(1)
+          PY

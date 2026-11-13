@@ -1,0 +1,24 @@
+name: Public Bluesky identity check
+on:
+  push:
+    paths:
+      - .github/workflows/resolve-identity.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Resolve public handle
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          u = 'https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=lhrftraining.bsky.social'
+          with urllib.request.urlopen(u, timeout=15) as response:
+              data = json.load(response)
+          did = data.get('did')
+          if not isinstance(did, str) or not did.startswith('did:plc:'):
+              raise SystemExit('No valid DID returned')
+          print('Public DID:', did)
+          PY

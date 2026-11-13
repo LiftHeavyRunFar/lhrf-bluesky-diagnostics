@@ -1,0 +1,47 @@
+name: Read-only Bluesky search diagnostic
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bluesky-search.yml
+permissions: {}
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public profile and search
+        run: |
+          python3 - <<'PY'
+          import json, urllib.error, urllib.request
+          urls = {
+              'profile': 'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=lhrftraining.bsky.social',
+              'search': 'https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=running&limit=1',
+          }
+          failed = False
+          for name, url in urls.items():
+              req = urllib.request.Request(url, headers={'Accept': 'application/json', 'User-Agent': 'LHRF-read-only-diagnostic/1.0'})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as response:
+                      status = response.status
+                      content_type = response.headers.get('Content-Type', '')
+                      raw = response.read(100000)
+              except urllib.error.HTTPError as error:
+                  status, content_type, raw = error.code, error.headers.get('Content-Type', ''), b''
+              except Exception as error:
+                  print(f'{name}: request failed ({type(error).__name__})')
+                  failed = True
+                  continue
+              print(f'{name}: HTTP {status}; content-type {content_type}')
+              try:
+                  data = json.loads(raw)
+                  if name == 'search':
+                      posts = data.get('posts')
+                      print(f'search: post count {len(posts) if isinstance(posts, list) else "missing"}')
+                      if not isinstance(posts, list): failed = True
+              except (ValueError, UnicodeError):
+                  print(f'{name}: response is not JSON')
+                  failed = True
+              if status != 200: failed = True
+          raise SystemExit(1 if failed else 0)
+          PY

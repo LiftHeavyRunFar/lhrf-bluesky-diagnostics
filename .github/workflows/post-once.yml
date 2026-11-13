@@ -29,12 +29,12 @@ jobs:
               stage="authentication"
               session=post("com.atproto.server.createSession",{"identifier":"lhrftraining.bsky.social","password":pw})
               if session.get("did")!=did or session.get("handle","").lower()!="lhrftraining.bsky.social": raise ValueError("identity")
-              text="Two sessions in one day? If your schedule allows, do the one you most want to perform well first. A demanding run and hard lower-body work can both leave your legs tired, so plan the rest of the week around them."
+              text="First week lifting and running? Pick one session to give your best effort, book the days you can actually train, and keep easy runs at a pace you can talk through. What would make your first week easier to fit in?"
               record={"$type":"app.bsky.feed.post","text":text,"createdAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),"langs":["en"]}
               stage="createRecord"
-              result=post("com.atproto.repo.createRecord",{"repo":did,"collection":"app.bsky.feed.post","rkey":"3n27k2yklj22b","record":record},session["accessJwt"])
-              if result.get("uri")!="at://"+did+"/app.bsky.feed.post/3n27k2yklj22b": raise ValueError("unexpected result")
-              print("Post created; fixed record key 3n27k2yklj22b")
+              result=post("com.atproto.repo.createRecord",{"repo":did,"collection":"app.bsky.feed.post","rkey":"3n27yqh2qjc4j","record":record},session["accessJwt"])
+              if result.get("uri")!="at://"+did+"/app.bsky.feed.post/3n27yqh2qjc4j": raise ValueError("unexpected result")
+              print("Post created; fixed record key 3n27yqh2qjc4j")
           except urllib.error.HTTPError as error:
               print("Stage:",stage,"HTTP",error.code)
               raise SystemExit(1)

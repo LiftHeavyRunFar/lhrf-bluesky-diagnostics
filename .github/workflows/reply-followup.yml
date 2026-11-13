@@ -1,0 +1,50 @@
+name: Two individual community replies
+on: workflow_dispatch
+permissions: {}
+jobs:
+  replies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reply to two checked conversations
+        env:
+          PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error,datetime
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+          op=urllib.request.build_opener(NoRedirect())
+          base='https://bsky.social/xrpc/'
+          did='did:plc:k3qs4p7s7cylcqpvbj5v7dn4'
+          def call(endpoint,data=None,token=None):
+              h={'Content-Type':'application/json'}
+              if token: h['Authorization']='Bearer '+token
+              req=urllib.request.Request(base+endpoint,data=json.dumps(data).encode() if data is not None else None,headers=h)
+              with op.open(req,timeout=20) as r: return json.load(r)
+          try:
+              s=call('com.atproto.server.createSession',{'identifier':'lhrftraining.bsky.social','password':os.environ['PASSWORD']})
+              if s.get('did')!=did or s.get('handle','').lower()!='lhrftraining.bsky.social': raise ValueError('identity')
+              token=s['accessJwt']
+              targets=[
+                ('at://did:plc:qtya3wv5atp37w3cpaot2zpr/app.bsky.feed.post/3n27ocmktks2w','Today was actually supposed to be a rest day','3n27pkqmuzg23','Friday gym day is a hard habit to break! Fingers crossed the legs are kind for Sunday. What have you got planned for the big run?'),
+                ('at://did:plc:a26zqgk77mepmgcaelfjmj5p/app.bsky.feed.post/3n25rmqm66k2w','The gym is so boring.','3n27pkqmuzy24','Sisyphus deserved a better playlist at least! Would taking the run outside make it less of a slog, or is the lifting part just as boring?')]
+              for uri,expected,rkey,text in targets:
+                  stage='check thread'
+                  thread=call('app.bsky.feed.getPostThread?'+urllib.parse.urlencode({'uri':uri,'depth':1}),token=token).get('thread',{})
+                  post=thread.get('post',{})
+                  if post.get('uri')!=uri or not post.get('record',{}).get('text','').startswith(expected): raise ValueError('target changed')
+                  if any(x.get('post',{}).get('author',{}).get('did')==did for x in thread.get('replies',[])):
+                      print('Already replied:',rkey); continue
+                  parent={'uri':uri,'cid':post['cid']}
+                  root=post.get('record',{}).get('reply',{}).get('root',parent)
+                  record={'$type':'app.bsky.feed.post','text':text,'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'langs':['en'],'reply':{'root':root,'parent':parent}}
+                  stage='create reply'
+                  result=call('com.atproto.repo.createRecord',{'repo':did,'collection':'app.bsky.feed.post','rkey':rkey,'record':record},token)
+                  if result.get('uri')!='at://'+did+'/app.bsky.feed.post/'+rkey: raise ValueError('unexpected result')
+                  print('Reply created:',rkey)
+          except urllib.error.HTTPError as e:
+              print('Stage:',stage,'HTTP',e.code); raise SystemExit(1)
+          except Exception as e:
+              print('Error type:',type(e).__name__); raise SystemExit(1)
+          PY

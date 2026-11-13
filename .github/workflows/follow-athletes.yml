@@ -1,0 +1,45 @@
+name: Follow two relevant athletes
+on: workflow_dispatch
+permissions: {}
+jobs:
+  follow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Follow checked accounts
+        env:
+          PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error,datetime
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+          op=urllib.request.build_opener(NoRedirect())
+          base='https://bsky.social/xrpc/'
+          did='did:plc:k3qs4p7s7cylcqpvbj5v7dn4'
+          def call(endpoint,data=None,token=None):
+              h={'Content-Type':'application/json'}
+              if token: h['Authorization']='Bearer '+token
+              req=urllib.request.Request(base+endpoint,data=json.dumps(data).encode() if data is not None else None,headers=h)
+              with op.open(req,timeout=20) as r: return json.load(r)
+          stage='authentication'
+          try:
+              s=call('com.atproto.server.createSession',{'identifier':'lhrftraining.bsky.social','password':os.environ['PASSWORD']})
+              if s.get('did')!=did or s.get('handle','').lower()!='lhrftraining.bsky.social': raise ValueError('identity')
+              token=s['accessJwt']
+              for handle,subject,key in [('punkyrennie.bsky.social','did:plc:qtya3wv5atp37w3cpaot2zpr','3n27prokoa223'),('beninchamonix.eurosky.social','did:plc:wf7rzqjij33723bpwfvitqto','3n27prokoam24')]:
+                  stage='check profile'
+                  p=call('app.bsky.actor.getProfile?'+urllib.parse.urlencode({'actor':handle}),token=token)
+                  if p.get('did')!=subject: raise ValueError('target changed')
+                  if p.get('viewer',{}).get('following'):
+                      print('Already following:',handle); continue
+                  stage='create follow'
+                  record={'$type':'app.bsky.graph.follow','subject':subject,'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')}
+                  result=call('com.atproto.repo.createRecord',{'repo':did,'collection':'app.bsky.graph.follow','rkey':key,'record':record},token)
+                  if result.get('uri')!='at://'+did+'/app.bsky.graph.follow/'+key: raise ValueError('unexpected result')
+                  print('Followed:',handle)
+          except urllib.error.HTTPError as e:
+              print('Stage:',stage,'HTTP',e.code); raise SystemExit(1)
+          except Exception as e:
+              print('Stage:',stage,'error type:',type(e).__name__); raise SystemExit(1)
+          PY

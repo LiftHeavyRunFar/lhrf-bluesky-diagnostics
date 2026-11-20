@@ -1,0 +1,82 @@
+name: Approved recovery replies 2026-11-20
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/recovery-20261120.yml']
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: recovery-replies-20261120
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Publish only the two owner-approved replies with duplicate and target checks
+        env:
+          PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.parse,urllib.error,datetime,hashlib
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+          op=urllib.request.build_opener(NoRedirect())
+          base='https://bsky.social/xrpc/'
+          did='did:plc:k3qs4p7s7cylcqpvbj5v7dn4'
+          stage='authenticate'
+          def call(endpoint,data=None,token=None):
+              h={'Content-Type':'application/json'}
+              if token:h['Authorization']='Bearer '+token
+              req=urllib.request.Request(base+endpoint,data=json.dumps(data).encode() if data is not None else None,headers=h)
+              with op.open(req,timeout=20) as response:return json.load(response)
+          targets=[
+           {'id':'R1','uri':'at://did:plc:lojn7hdodl5s67ri4ocyyzp7/app.bsky.feed.post/3n2gwhfhfvk2b','author':'did:plc:lojn7hdodl5s67ri4ocyyzp7','sha':'89fb2e5d0fd9fc7527d2ed62bbed1f5a386a0c9867ab36cbfc12ffca67761bdd','rkey':'3n2rdbzjc5422','text':'That patience clearly carries over from miles to reps. Thanks for explaining it. Do you keep the lifting and running in one log, or plan them separately?'},
+           {'id':'A4','uri':'at://did:plc:k3qs4p7s7cylcqpvbj5v7dn4/app.bsky.feed.post/3n2dzdxpyck2b','author':did,'sha':'18e37624d0a9bc01a0e81e9e8064c63493dabe62c0894f5b8348906a252ac0d8','rkey':'3n2rdbzjc5423','text':'If the long run gets your reliable slot, make the shorter lift about the main work you want to keep. An extra accessory can wait. When time gets tight, what do you trim first: sets, accessories or the run?'}
+          ]
+          def matches(value,target):
+              return value.get('text')==target['text'] and value.get('reply',{}).get('parent',{}).get('uri')==target['uri']
+          try:
+              session=call('com.atproto.server.createSession',{'identifier':'lhrftraining.bsky.social','password':os.environ['PASSWORD']})
+              if session.get('did')!=did or session.get('handle','').lower()!='lhrftraining.bsky.social':raise ValueError('identity')
+              token=session['accessJwt']
+              for target in targets:
+                  assert len(target['text'])<=300
+                  stage=target['id']+' duplicate record check'
+                  lookup='com.atproto.repo.getRecord?'+urllib.parse.urlencode({'repo':did,'collection':'app.bsky.feed.post','rkey':target['rkey']})
+                  try:
+                      existing=call(lookup,token=token)
+                  except urllib.error.HTTPError as error:
+                      if error.code not in (400,404):raise
+                      # Only a documented missing-record error is an absent record.
+                      payload=json.load(error)
+                      if payload.get('error')!='RecordNotFound':raise ValueError('record lookup refused')
+                  else:
+                      if not matches(existing.get('value',{}),target):raise ValueError('record key occupied')
+                      print(target['id'],'already verified','https://bsky.app/profile/lhrftraining.bsky.social/post/'+target['rkey'])
+                      continue
+                  stage=target['id']+' current thread check'
+                  thread=call('app.bsky.feed.getPostThread?'+urllib.parse.urlencode({'uri':target['uri'],'depth':1,'parentHeight':0}),token=token).get('thread',{})
+                  post=thread.get('post',{})
+                  if post.get('uri')!=target['uri'] or post.get('author',{}).get('did')!=target['author']:raise ValueError('target identity changed')
+                  if hashlib.sha256(post.get('record',{}).get('text','').encode()).hexdigest()!=target['sha']:raise ValueError('target text changed')
+                  if any(item.get('post',{}).get('author',{}).get('did')==did for item in thread.get('replies',[])):
+                      print(target['id'],'blocked: brand reply already present');continue
+                  if post.get('replyCount',0)>len(thread.get('replies',[])):raise ValueError('incomplete direct reply check')
+                  parent={'uri':post['uri'],'cid':post['cid']}
+                  root=post.get('record',{}).get('reply',{}).get('root',parent)
+                  record={'$type':'app.bsky.feed.post','text':target['text'],'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'langs':['en'],'reply':{'root':root,'parent':parent}}
+                  stage=target['id']+' create'
+                  created=call('com.atproto.repo.createRecord',{'repo':did,'collection':'app.bsky.feed.post','rkey':target['rkey'],'record':record},token)
+                  expected='at://'+did+'/app.bsky.feed.post/'+target['rkey']
+                  if created.get('uri')!=expected:raise ValueError('unexpected create result')
+                  stage=target['id']+' exact readback'
+                  saved=call(lookup,token=token)
+                  if saved.get('uri')!=expected or not matches(saved.get('value',{}),target):raise ValueError('readback mismatch')
+                  print(target['id'],'published and verified','https://bsky.app/profile/lhrftraining.bsky.social/post/'+target['rkey'])
+          except urllib.error.HTTPError as error:
+              print('Failed stage:',stage,'HTTP',error.code);raise SystemExit(1)
+          except Exception as error:
+              print('Failed stage:',stage,'type:',type(error).__name__);raise SystemExit(1)
+          
+          PY
